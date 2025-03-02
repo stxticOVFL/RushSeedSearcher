@@ -1,0 +1,18 @@
+﻿---
+BasedOnStyle: WebKit
+BreakBeforeBraces: Custom
+ColumnLimit: '100'
+ConstructorInitializerAllOnOneLineOrOnePerLine: 'true'
+FixNamespaceComments: 'true'
+KeepEmptyLinesAtTheStartOfBlocks: 'false'
+MaxEmptyLinesToKeep: '2'
+Standard: Cpp11
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+SpaceInEmptyParentheses: false
+AccessModifierOffset: -2
+BraceWrapping:
+    BeforeElse: true    
+
+...
