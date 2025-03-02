@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <chrono>
+#include <csignal>
 #include <cstddef>
 #include <cstdlib>
 #include <iostream>
@@ -31,15 +32,15 @@
 #endif
 
 
-class random {
+class random_dotnet {
   public:
-    random() { seed_array = new int[56]; };
-    random(int seed) {
+    random_dotnet() { seed_array = new int[56]; };
+    random_dotnet(int seed) {
         seed_array = new int[56];
         set_seed(seed);
     }
 
-    ~random() { delete[] seed_array; }
+    ~random_dotnet() { delete[] seed_array; }
 
     inline void set_seed(int seed) {
         constexpr auto lim = std::numeric_limits<int>();
@@ -148,38 +149,29 @@ std::mutex cout_mutex;
 std::chrono::time_point<std::chrono::steady_clock> start;
 int level_count;
 
-void get_levels(int* output, int* pool, random& random) {
+void get_levels(int* output, int* pool, random_dotnet& random) {
 #if USE_TRACY
     ZoneScopedN("Get Levels");
 #endif
     int target_count = size / sizeof(int);
 
-    {
-#if USE_TRACY
-        ZoneScopedN("Initial Set");
-#endif
-        for (int i = 0; i < level_count; ++i) {
+    int last = 0;
+    memset(output, 0xFF, sizeof(int) * level_count);
+    for (int i = 0; i < level_count; ++i) {
+        if (output[i] == 0xFFFFFFFF)
             output[i] = i;
-            pool[i] = random.next(level_count);
-        }
-    }
 
-    int cap = level_count;
-    for (; cap > target_count; --cap) {
-        if (pool[cap - 1] < target_count)
-            break;
-    }
-
-    {
-#if USE_TRACY
-        ZoneScopedN("Shuffle");
-#endif
-
-        for (int i = 0; i < cap; ++i) {
-            int rand = pool[i];
-            int num = output[i];
-            output[i] = output[rand];
-            output[rand] = num;
+        int r = random.next(level_count);
+        pool[i] = r;
+        if (r < target_count) {
+            for (int j = last; j < i + 1; ++j) {
+                int rand = pool[j];
+                int num = output[j];
+                int randv = output[rand];
+                output[j] = randv == 0xFFFFFFFF ? rand : randv;
+                output[rand] = num;
+            }
+            last = i + 1;
         }
     }
 
@@ -202,7 +194,7 @@ void level_thread(int offset) {
     int* randpool = new int[level_count];
     int* targetM = new int[size / sizeof(int)];
     memcpy(targetM, targetD, size); // own memory
-    random rand(offset);
+    random_dotnet rand(offset);
 
     if (verbose) {
         std::lock_guard<std::mutex> lockC(cout_mutex);
@@ -219,7 +211,7 @@ void level_thread(int offset) {
             if (!memcmp(levels, targetM, size)) {
                 std::lock_guard<std::mutex> lockC(cout_mutex);
 
-                if (found)
+                if (found) // early check
                     break;
                 std::cout << "** Found: " << offset << " ("
                           << (std::chrono::duration_cast<std::chrono::microseconds>(
@@ -269,6 +261,12 @@ inline bool stob(const std::string& str) {
     bool res;
     std::istringstream(str) >> res;
     return res;
+}
+
+void signal_handler(int signal) {
+    found = true; // force stop it
+    std::lock_guard<std::mutex> lockC(cout_mutex);
+    std::cout << "\nForce stopping." << std::endl;
 }
 
 // https://stackoverflow.com/a/868894
@@ -338,7 +336,8 @@ int main(int argc, char** argv) {
     int seed;
     if (input.get_option("-g", &seed, stoi)) {
         // do the whole export shenaigan
-        return 0;
+        std::cout << "-g is not currently supported." << std::endl;
+        return 2;
     }
     else if (input.option_index("-g") != -1)
         return display_help();
@@ -351,7 +350,7 @@ int main(int argc, char** argv) {
     std::string list = input.tokens[1];
     // views fuckin HATE me rn so fuck it im just gonna forloop this shit it's fine
     size_t pos = 0;
-    auto target = std::vector<int>();
+    std::vector<int> target;
     try {
         while ((pos = list.find(',')) != std::string::npos) {
             target.push_back(std::stoi(list.substr(0, pos)) - 1);
@@ -370,14 +369,10 @@ int main(int argc, char** argv) {
     if (input.option_index("-j") != -1 && !input.get_option("-j", &jobs, stoi))
         return display_help();
 
+    std::signal(SIGINT, signal_handler);
+
     std::vector<std::thread> jobThreads;
     jobThreads.reserve(jobs);
-
-    random rand(161803398);
-    for (int i = 0; i < 20; ++i) {
-        std::cout << rand.next(0, 121) << ", ";
-    }
-    std::cout << std::endl;
 
 #if _WIN32
     SetPriorityClass(GetCurrentProcess(),
